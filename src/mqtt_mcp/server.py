@@ -18,7 +18,7 @@ from .cache import save_cache
 
 
 # Create server instance
-server = Server(name="mqtt-mcp-server", version="1.0.0")
+server = Server(name="mqtt-mcp-server", version="1.0.1")
 
 
 @server.list_tools()
@@ -222,7 +222,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
 async def main():
     """Main server entry point."""
-    sys.stderr.write("Starting MQTT MCP Server v1.0.0\n")
+    sys.stderr.write("Starting MQTT MCP Server v1.0.1\n")
     sys.stderr.write("All output goes to stderr. stdout is reserved for JSON-RPC.\n")
 
     # Set up signal handlers for graceful shutdown
@@ -241,7 +241,7 @@ async def main():
     async with stdio_server() as (stdin, stdout):
         init_options = InitializationOptions(
             server_name="mqtt-mcp-server",
-            server_version="1.0.0",
+            server_version="1.0.1",
             capabilities=ServerCapabilities(
                 tools={}
             )

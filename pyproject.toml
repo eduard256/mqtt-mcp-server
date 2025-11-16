@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mqtt-mcp-server"
-version = "1.0.0"
+version = "1.0.1"
 description = "MQTT Model Context Protocol Server for AI-powered smart home control"
 readme = "README.md"
 license = "MIT"
@@ -25,5 +25,5 @@ Issues = "https://github.com/yourusername/mqtt-mcp-server/issues"
 [project.scripts]
 mqtt-mcp-server = "mqtt_mcp.server:main"
 
-[tool.hatch.build]
+[tool.hatch.build.targets.wheel]
 packages = ["src/mqtt_mcp"]
