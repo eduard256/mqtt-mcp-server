@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mqtt-mcp-server"
+version = "1.0.0"
+description = "MQTT Model Context Protocol Server for AI-powered smart home control"
+readme = "README.md"
+license = "MIT"
+authors = [
+    {name = "MQTT MCP Server Contributors"}
+]
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.0.0",
+    "aiomqtt>=2.0.0",
+    "pydantic>=2.0.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/mqtt-mcp-server"
+Issues = "https://github.com/yourusername/mqtt-mcp-server/issues"
+
+[project.scripts]
+mqtt-mcp-server = "mqtt_mcp.server:main"
+
+[tool.hatch.build]
+packages = ["src/mqtt_mcp"]
