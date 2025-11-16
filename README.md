@@ -1,5 +1,9 @@
 # MQTT MCP Server
 
+[![PyPI version](https://badge.fury.io/py/mqtt-mcp-server.svg)](https://badge.fury.io/py/mqtt-mcp-server)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A Model Context Protocol (MCP) server that enables AI assistants to discover, monitor, and control smart home devices through MQTT.
 
 ## Features
@@ -9,88 +13,202 @@ A Model Context Protocol (MCP) server that enables AI assistants to discover, mo
 - 📤 **Publishing**: Send commands to MQTT devices with validation
 - 📹 **Event Recording**: Monitor MQTT traffic in real-time
 
-## Installation
+## Quick Start
+
+### Installation
+
+Install from PyPI:
 
 ```bash
-# Install from source
-pip install -e .
-
-# Or install dependencies directly
-pip install mcp aiomqtt pydantic
+pip install mqtt-mcp-server
 ```
+
+Or install from source:
+
+```bash
+git clone https://github.com/eduard256/mqtt-mcp-server.git
+cd mqtt-mcp-server
+pip install -e .
+```
+
+### Requirements
+
+- Python 3.10 or higher
+- MQTT broker (e.g., Mosquitto, HiveMQ, EMQX)
 
 ## Configuration
 
-Configure the MQTT connection using environment variables:
+The server uses environment variables for MQTT broker configuration:
 
-```bash
-export MQTT_HOST="localhost"      # Default: localhost
-export MQTT_PORT="1883"           # Default: 1883
-export MQTT_USERNAME="user"       # Optional
-export MQTT_PASSWORD="pass"       # Optional
-```
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MQTT_HOST` | MQTT broker hostname or IP | `localhost` |
+| `MQTT_PORT` | MQTT broker port | `1883` |
+| `MQTT_USERNAME` | MQTT username (optional) | - |
+| `MQTT_PASSWORD` | MQTT password (optional) | - |
 
-## MCP Client Configuration
+## Setup for Different MCP Clients
 
 ### Claude Desktop
 
-Add to your Claude Desktop configuration:
+**Step 1**: Install the package
 
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+```bash
+pip install mqtt-mcp-server
+```
+
+**Step 2**: Configure Claude Desktop
+
+Edit the configuration file:
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+
+Add the MQTT server configuration:
 
 ```json
 {
   "mcpServers": {
     "mqtt": {
-      "command": "python",
+      "command": "python3",
       "args": ["-m", "mqtt_mcp.server"],
       "env": {
-        "MQTT_HOST": "10.0.20.104",
+        "MQTT_HOST": "your-broker-host",
         "MQTT_PORT": "1883",
-        "MQTT_USERNAME": "mqtt",
-        "MQTT_PASSWORD": "mqtt"
+        "MQTT_USERNAME": "your-username",
+        "MQTT_PASSWORD": "your-password"
       }
     }
   }
 }
 ```
 
-### Claude Code
+**Windows users**: Use `python` instead of `python3`
 
-Add to your project settings:
+**Step 3**: Restart Claude Desktop
+
+The MQTT tools will now be available in Claude Desktop.
+
+---
+
+### Using Command Line
+
+**Linux / macOS:**
+
+```bash
+# Install
+pip install mqtt-mcp-server
+
+# Add to your project
+claude mcp add --transport stdio mqtt \
+  --env MQTT_HOST=your-broker \
+  --env MQTT_PORT=1883 \
+  --env MQTT_USERNAME=username \
+  --env MQTT_PASSWORD=password \
+  -- python3 -m mqtt_mcp.server
+```
+
+**Windows:**
+
+```powershell
+# Install
+pip install mqtt-mcp-server
+
+# Add to your project
+claude mcp add --transport stdio mqtt `
+  --env MQTT_HOST=your-broker `
+  --env MQTT_PORT=1883 `
+  --env MQTT_USERNAME=username `
+  --env MQTT_PASSWORD=password `
+  -- python -m mqtt_mcp.server
+```
+
+---
+
+### Cursor
+
+**Step 1**: Install the package
+
+```bash
+pip install mqtt-mcp-server
+```
+
+**Step 2**: Configure Cursor
+
+Add to your Cursor settings (`.cursor/mcp.json` or global settings):
 
 ```json
 {
-  "mcp": {
+  "mcpServers": {
     "mqtt": {
-      "command": "python",
+      "type": "stdio",
+      "command": "python3",
       "args": ["-m", "mqtt_mcp.server"],
       "env": {
-        "MQTT_HOST": "localhost",
-        "MQTT_PORT": "1883"
+        "MQTT_HOST": "your-broker-host",
+        "MQTT_PORT": "1883",
+        "MQTT_USERNAME": "your-username",
+        "MQTT_PASSWORD": "your-password"
       }
     }
   }
 }
 ```
 
-### Cursor / Other MCP Clients
+**Windows users**: Replace `python3` with `python`
 
-Use the standard MCP configuration format with stdio transport:
+---
+
+### Cline (VS Code Extension)
+
+**Step 1**: Install the package
+
+```bash
+pip install mqtt-mcp-server
+```
+
+**Step 2**: Configure Cline
+
+Add to Cline MCP settings:
 
 ```json
 {
-  "mqtt-server": {
-    "transport": "stdio",
-    "command": "mqtt-mcp-server",
-    "env": {
-      "MQTT_HOST": "your-broker-host",
-      "MQTT_PORT": "1883"
+  "mcpServers": {
+    "mqtt": {
+      "command": "python3",
+      "args": ["-m", "mqtt_mcp.server"],
+      "env": {
+        "MQTT_HOST": "your-broker-host",
+        "MQTT_PORT": "1883",
+        "MQTT_USERNAME": "your-username",
+        "MQTT_PASSWORD": "your-password"
+      }
     }
   }
 }
 ```
+
+---
+
+### Verification
+
+After configuration, verify the server is working:
+
+**For Command Line users:**
+
+```bash
+claude mcp list
+```
+
+You should see:
+```
+mqtt: python3 -m mqtt_mcp.server - ✓ Connected
+```
+
+**For Desktop/GUI clients:**
+
+Ask your AI assistant: "What MQTT tools are available?"
+
+The assistant should list: `topics`, `value`, `publish`, and `record` tools.
 
 ## Tools
 
@@ -208,29 +326,89 @@ mqtt-mcp-server 2>mqtt.log
 
 ## Development
 
+### Linux / macOS
+
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/mqtt-mcp-server.git
+git clone https://github.com/eduard256/mqtt-mcp-server.git
 cd mqtt-mcp-server
 
 # Create virtual environment
-python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
+python3 -m venv venv
+source venv/bin/activate
 
 # Install in development mode
 pip install -e .
 
 # Run tests
-python tests/test_topics.py
-python tests/test_value.py
-python tests/test_publish.py
-python tests/test_record.py
+python3 tests/test_topics.py
+python3 tests/test_value.py
+python3 tests/test_publish.py
+python3 tests/test_record.py
 ```
+
+### Windows
+
+```powershell
+# Clone repository
+git clone https://github.com/eduard256/mqtt-mcp-server.git
+cd mqtt-mcp-server
+
+# Create virtual environment
+python -m venv venv
+venv\Scripts\activate
+
+# Install in development mode
+pip install -e .
+
+# Run tests
+python tests\test_topics.py
+python tests\test_value.py
+python tests\test_publish.py
+python tests\test_record.py
+```
+
+## Troubleshooting
+
+### Common Issues
+
+**"python3 not found" on Windows**
+- Use `python` instead of `python3` in all commands
+
+**"Connection refused" error**
+- Check if your MQTT broker is running
+- Verify `MQTT_HOST` and `MQTT_PORT` are correct
+- Check firewall settings
+
+**"ModuleNotFoundError: No module named 'mqtt_mcp'"**
+- Make sure you installed the package: `pip install mqtt-mcp-server`
+- If using virtual environment, make sure it's activated
+
+**Tools not showing up in Claude/Cursor**
+- Restart the application after configuration
+- Check configuration file syntax (valid JSON)
+- Verify the server connects: `claude mcp list`
 
 ## License
 
-MIT
+MIT License - see [LICENSE](LICENSE) file for details
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## Links
+
+- **PyPI**: https://pypi.org/project/mqtt-mcp-server/
+- **GitHub**: https://github.com/eduard256/mqtt-mcp-server
+- **Issues**: https://github.com/eduard256/mqtt-mcp-server/issues
+
+## Author
+
+Eduard Kazantsev ([@eduard256](https://github.com/eduard256))
