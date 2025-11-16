@@ -236,10 +236,15 @@ async def main():
 
     # Run server using stdio transport
     from mcp.server.models import InitializationOptions
+    from mcp.types import ServerCapabilities
+
     async with stdio_server() as (stdin, stdout):
         init_options = InitializationOptions(
-            serverName="mqtt-mcp-server",
-            serverVersion="1.0.0"
+            server_name="mqtt-mcp-server",
+            server_version="1.0.0",
+            capabilities=ServerCapabilities(
+                tools={}
+            )
         )
         await server.run(stdin, stdout, init_options)
 
