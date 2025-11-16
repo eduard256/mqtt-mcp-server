@@ -235,8 +235,13 @@ async def main():
     signal.signal(signal.SIGTERM, signal_handler)
 
     # Run server using stdio transport
+    from mcp.server.models import InitializationOptions
     async with stdio_server() as (stdin, stdout):
-        await server.run(stdin, stdout)
+        init_options = InitializationOptions(
+            serverName="mqtt-mcp-server",
+            serverVersion="1.0.0"
+        )
+        await server.run(stdin, stdout, init_options)
 
 
 if __name__ == "__main__":
