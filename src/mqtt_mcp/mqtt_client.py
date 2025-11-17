@@ -56,13 +56,17 @@ class MQTTClient:
                 port=self.port,
                 username=self.username,
                 password=self.password,
-                timeout=timeout
+                timeout=timeout,
+                clean_session=True,
+                keepalive=60
             )
         else:
             return Client(
                 hostname=self.host,
                 port=self.port,
-                timeout=timeout
+                timeout=timeout,
+                clean_session=True,
+                keepalive=60
             )
 
     def get_connection_info(self) -> str:
