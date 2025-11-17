@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 
 from ..mqtt_client import MQTTClient
-from ..cache import load_cache, save_cache, get_cached_value, set_cached_value
+from ..cache import save_cache, set_cached_value
 
 
 class ValueParams(BaseModel):
@@ -18,7 +18,9 @@ class ValueParams(BaseModel):
 
 async def value(params: ValueParams) -> Dict[str, Any]:
     """
-    Read current values from specific MQTT topics.
+    Read current FRESH values from specific MQTT topics.
+
+    NOTE: Always reads live data for accuracy. Cache is updated but not used for results.
 
     Args:
         params: Value reading parameters
@@ -30,73 +32,92 @@ async def value(params: ValueParams) -> Dict[str, Any]:
     success = []
     errors = []
 
-    # Load cache
-    load_cache()
+    sys.stderr.write(f"Reading {len(params.topics)} topic(s) from MQTT (fresh data)...\n")
 
-    sys.stderr.write(f"Reading {len(params.topics)} topic(s)\n")
+    try:
+        # Open ONE connection for ALL topics
+        async with await mqtt.create_client(timeout=params.timeout) as client:
+            sys.stderr.write(f"Connected to broker, subscribing to {len(params.topics)} topic(s)...\n")
 
-    for topic in params.topics:
-        # Check cache first
-        cached = get_cached_value(topic)
-        if cached:
-            value, age = cached
-            sys.stderr.write(f"Topic '{topic}' found in cache (age: {age:.1f}s)\n")
+            # Subscribe to ALL requested topics
+            for topic in params.topics:
+                await client.subscribe(topic)
 
-            # Parse value if JSON
+            # Track which topics we've received
+            received_topics = set()
+            topic_values = {}
+
+            # Collect messages with overall timeout
+            async def collect_values():
+                async for message in client.messages:
+                    topic = str(message.topic)
+
+                    # Only process if it's one of our requested topics
+                    if topic in params.topics and topic not in received_topics:
+                        # Decode payload
+                        try:
+                            payload = message.payload.decode('utf-8')
+                        except (UnicodeDecodeError, AttributeError):
+                            payload = str(message.payload)
+
+                        # Store value
+                        topic_values[topic] = payload
+                        received_topics.add(topic)
+
+                        sys.stderr.write(f"[{len(received_topics)}/{len(params.topics)}] Received '{topic}'\n")
+
+                        # Update cache for future use
+                        set_cached_value(topic, payload)
+
+                        # Got all topics? Exit early
+                        if len(received_topics) == len(params.topics):
+                            sys.stderr.write("All topics received, exiting early\n")
+                            break
+
+            # Wait for messages with timeout
             try:
-                parsed_value = json.loads(value) if isinstance(value, str) else value
-            except json.JSONDecodeError:
-                parsed_value = value
+                await asyncio.wait_for(collect_values(), timeout=params.timeout)
+            except asyncio.TimeoutError:
+                sys.stderr.write(f"Timeout after {params.timeout}s, got {len(received_topics)}/{len(params.topics)} topics\n")
 
-            success.append({
-                "topic": topic,
-                "value": parsed_value,
-                "source": "cache",
-                "age_seconds": round(age, 2)
-            })
-        else:
-            # Read live from MQTT
-            sys.stderr.write(f"Reading topic '{topic}' from MQTT...\n")
+        # Process received topics
+        for topic in params.topics:
+            if topic in topic_values:
+                value = topic_values[topic]
 
-            try:
-                value = await read_topic_live(mqtt, topic, params.timeout)
+                # Parse value if JSON
+                try:
+                    parsed_value = json.loads(value) if isinstance(value, str) else value
+                except json.JSONDecodeError:
+                    parsed_value = value
 
-                if value is not None:
-                    sys.stderr.write(f"Got value for topic '{topic}'\n")
-
-                    # Update cache
-                    set_cached_value(topic, value if isinstance(value, str) else json.dumps(value))
-
-                    # Parse value if JSON
-                    try:
-                        parsed_value = json.loads(value) if isinstance(value, str) else value
-                    except json.JSONDecodeError:
-                        parsed_value = value
-
-                    success.append({
-                        "topic": topic,
-                        "value": parsed_value,
-                        "source": "live",
-                        "age_seconds": 0.0
-                    })
-                else:
-                    sys.stderr.write(f"Timeout reading topic '{topic}'\n")
-
-                    # Generate suggestion
-                    suggestion = get_suggestion(topic)
-
-                    errors.append({
-                        "topic": topic,
-                        "error": f"No message received within {params.timeout}s timeout",
-                        "suggestion": suggestion
-                    })
-
-            except Exception as e:
-                sys.stderr.write(f"Error reading topic '{topic}': {e}\n")
+                success.append({
+                    "topic": topic,
+                    "value": parsed_value,
+                    "source": "live",
+                    "age_seconds": 0.0
+                })
+            else:
+                # Topic didn't respond within timeout
+                suggestion = get_suggestion(topic)
                 errors.append({
                     "topic": topic,
-                    "error": str(e),
-                    "suggestion": "Check if the topic exists and is being published to"
+                    "error": f"No message received within {params.timeout}s timeout",
+                    "suggestion": suggestion
+                })
+
+    except Exception as e:
+        # Connection-level error
+        error_msg = f"Connection error: {str(e)}"
+        sys.stderr.write(f"Connection failed: {error_msg}\n")
+
+        # All topics that weren't read go to errors
+        for topic in params.topics:
+            if topic not in [s["topic"] for s in success]:
+                errors.append({
+                    "topic": topic,
+                    "error": error_msg,
+                    "suggestion": "Check broker connection and credentials"
                 })
 
     # Save updated cache
@@ -108,43 +129,6 @@ async def value(params: ValueParams) -> Dict[str, Any]:
         "success": success,
         "errors": errors
     }
-
-
-async def read_topic_live(mqtt: MQTTClient, topic: str, timeout: int) -> Optional[str]:
-    """
-    Read a single topic value live from MQTT.
-
-    Args:
-        mqtt: MQTT client instance
-        topic: Topic to read
-        timeout: Timeout in seconds
-
-    Returns:
-        Value string or None if timeout
-    """
-    try:
-        async with await mqtt.create_client(timeout=timeout) as client:
-            await client.subscribe(topic)
-
-            # Wait for first message
-            async def wait_for_message():
-                async for message in client.messages:
-                    if str(message.topic) == topic:
-                        # Decode payload
-                        try:
-                            payload = message.payload.decode('utf-8')
-                        except (UnicodeDecodeError, AttributeError):
-                            payload = str(message.payload)
-                        return payload
-
-            try:
-                return await asyncio.wait_for(wait_for_message(), timeout=timeout)
-            except asyncio.TimeoutError:
-                return None
-
-    except Exception as e:
-        sys.stderr.write(f"Error in read_topic_live: {e}\n")
-        return None
 
 
 def get_suggestion(topic: str) -> str:

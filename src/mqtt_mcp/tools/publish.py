@@ -75,47 +75,66 @@ async def publish(params: PublishParams) -> Dict[str, Any]:
 
     sys.stderr.write("All messages passed validation\n")
 
-    # Phase 2: Publishing
+    # Phase 2: Publishing - use SINGLE connection for all messages
     success = []
     errors = []
 
-    for i, msg in enumerate(params.messages):
-        sys.stderr.write(f"Publishing to topic '{msg.topic}'...\n")
+    try:
+        # Open ONE connection for ALL messages
+        async with await mqtt.create_client(timeout=params.timeout) as client:
+            sys.stderr.write(f"Connected to broker, publishing {len(params.messages)} message(s)...\n")
 
-        try:
-            # Prepare payload
-            if isinstance(msg.payload, str):
-                payload_bytes = msg.payload.encode('utf-8')
-            elif isinstance(msg.payload, bytes):
-                payload_bytes = msg.payload
-            else:
-                # Convert to JSON
-                payload_bytes = json.dumps(msg.payload, ensure_ascii=False).encode('utf-8')
+            for i, msg in enumerate(params.messages):
+                try:
+                    # Prepare payload
+                    if isinstance(msg.payload, str):
+                        payload_bytes = msg.payload.encode('utf-8')
+                    elif isinstance(msg.payload, bytes):
+                        payload_bytes = msg.payload
+                    else:
+                        # Convert to JSON
+                        payload_bytes = json.dumps(msg.payload, ensure_ascii=False).encode('utf-8')
 
-            # Connect and publish
-            async with await mqtt.create_client(timeout=params.timeout) as client:
-                await client.publish(
-                    topic=msg.topic,
-                    payload=payload_bytes,
-                    qos=msg.qos,
-                    retain=msg.retain
-                )
+                    # Publish through the SAME connection
+                    await client.publish(
+                        topic=msg.topic,
+                        payload=payload_bytes,
+                        qos=msg.qos,
+                        retain=msg.retain
+                    )
 
-            sys.stderr.write(f"Successfully published to '{msg.topic}'\n")
+                    sys.stderr.write(f"[{i+1}/{len(params.messages)}] Published to '{msg.topic}'\n")
 
-            success.append({
-                "index": i,
-                "topic": msg.topic,
-                "payload": msg.payload,
-                "qos": msg.qos,
-                "retain": msg.retain,
-                "status": "published"
-            })
+                    success.append({
+                        "index": i,
+                        "topic": msg.topic,
+                        "payload": msg.payload,
+                        "qos": msg.qos,
+                        "retain": msg.retain,
+                        "status": "published"
+                    })
 
-        except Exception as e:
-            error_msg = str(e)
-            sys.stderr.write(f"Failed to publish to '{msg.topic}': {error_msg}\n")
+                except Exception as e:
+                    # Individual message error - continue with others
+                    error_msg = str(e)
+                    sys.stderr.write(f"[{i+1}/{len(params.messages)}] Failed to publish '{msg.topic}': {error_msg}\n")
 
+                    errors.append({
+                        "index": i,
+                        "topic": msg.topic,
+                        "payload": msg.payload,
+                        "error": error_msg,
+                        "status": "failed"
+                    })
+
+    except Exception as e:
+        # Connection-level error - mark all unpublished messages as failed
+        error_msg = f"Connection error: {str(e)}"
+        sys.stderr.write(f"Connection failed: {error_msg}\n")
+
+        # All messages that weren't published yet go to errors
+        for i in range(len(success) + len(errors), len(params.messages)):
+            msg = params.messages[i]
             errors.append({
                 "index": i,
                 "topic": msg.topic,
