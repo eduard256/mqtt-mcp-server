@@ -10,12 +10,24 @@ from ..mqtt_client import MQTTClient
 from ..cache import update_cache, get_cache
 
 
+# System topics to ignore (not useful for device control)
+IGNORED_TOPIC_PREFIXES = [
+    "homeassistant/",       # Home Assistant auto-discovery configs
+    "zigbee2mqtt/bridge/",  # Zigbee2MQTT system topics
+]
+
+
 class TopicsParams(BaseModel):
     """Parameters for topics tool."""
     scan_timeout: int = Field(default=10, ge=1, le=60, description="How long to scan for topics")
     keywords: Optional[List[str]] = Field(default=None, description="Keywords to filter topics (OR logic)")
     limit: int = Field(default=50, ge=1, le=200, description="Maximum results to return")
     offset: int = Field(default=0, ge=0, description="Pagination offset")
+
+
+def should_ignore_topic(topic: str) -> bool:
+    """Check if topic should be ignored."""
+    return any(topic.startswith(prefix) for prefix in IGNORED_TOPIC_PREFIXES)
 
 
 async def topics(params: TopicsParams) -> Dict[str, Any]:
@@ -52,6 +64,10 @@ async def topics(params: TopicsParams) -> Dict[str, Any]:
                 async for message in client.messages:
                     topic = str(message.topic)
 
+                    # Filter out system topics
+                    if should_ignore_topic(topic):
+                        continue
+
                     # Decode payload
                     try:
                         payload = message.payload.decode('utf-8')
@@ -62,7 +78,7 @@ async def topics(params: TopicsParams) -> Dict[str, Any]:
                     discovered_topics[topic] = payload
 
                     # Progress feedback
-                    if len(discovered_topics) % 100 == 0:
+                    if len(discovered_topics) % 50 == 0:
                         sys.stderr.write(f"Discovered {len(discovered_topics)} topics...\n")
 
             # Scan for specified duration
@@ -77,6 +93,9 @@ async def topics(params: TopicsParams) -> Dict[str, Any]:
         # Get all topics (discovered + cached)
         all_cache = get_cache()
         all_topics = sorted(set(list(discovered_topics.keys()) + list(all_cache.keys())))
+
+        # Filter out system topics from cache as well
+        all_topics = [t for t in all_topics if not should_ignore_topic(t)]
 
         # Apply keyword filter
         if params.keywords:
