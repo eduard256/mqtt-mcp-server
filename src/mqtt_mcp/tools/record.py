@@ -16,6 +16,24 @@ IGNORED_TOPIC_PREFIXES = [
     "homeassistant/",
 ]
 
+# Fields to ignore (noise that doesn't represent real events)
+IGNORED_FIELDS = [
+    "last_seen",
+    "timestamp",
+    "uptime",
+    "triggers_count",
+    "errors_count",
+    "last_trigger",
+    "power_outage_count",
+    "trigger_count",
+    "update",
+    "identify",
+    "effect",
+    "power_on_behavior",
+    "interlock",
+    "power_outage_memory",
+]
+
 
 class RecordParams(BaseModel):
     """Parameters for record tool."""
@@ -29,20 +47,43 @@ def should_ignore_topic(topic: str) -> bool:
     return any(topic.startswith(prefix) for prefix in IGNORED_TOPIC_PREFIXES)
 
 
-def get_payload_diff(old_payload: Any, new_payload: Any) -> Dict[str, Any]:
-    """Get difference between old and new payload."""
+def clean_payload(payload: Any) -> Dict[str, Any]:
+    """Remove ignored fields from payload."""
+    if not isinstance(payload, dict):
+        return {"value": payload}
+
+    cleaned = {}
+    for key, value in payload.items():
+        if key not in IGNORED_FIELDS:
+            cleaned[key] = value
+
+    return cleaned
+
+
+def get_device_name(topic: str) -> str:
+    """Extract device name from topic."""
+    # Remove common prefixes
+    topic = topic.replace("zigbee2mqtt/", "")
+    topic = topic.replace("automation/", "auto:")
+
+    # Remove /set, /action, /get suffixes
+    topic = topic.replace("/set", "")
+    topic = topic.replace("/action", "")
+    topic = topic.replace("/get", "")
+
+    return topic
+
+
+def get_changes(old_payload: Dict[str, Any], new_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Get only changed fields between old and new payload."""
     changes = {}
 
-    if isinstance(old_payload, dict) and isinstance(new_payload, dict):
-        all_keys = set(old_payload.keys()) | set(new_payload.keys())
-        for key in all_keys:
-            old_val = old_payload.get(key)
-            new_val = new_payload.get(key)
-            if old_val != new_val:
-                changes[key] = {"old": old_val, "new": new_val}
-    else:
-        if old_payload != new_payload:
-            changes = {"old": old_payload, "new": new_payload}
+    all_keys = set(old_payload.keys()) | set(new_payload.keys())
+    for key in all_keys:
+        old_val = old_payload.get(key)
+        new_val = new_payload.get(key)
+        if old_val != new_val:
+            changes[key] = new_val
 
     return changes
 
@@ -62,12 +103,11 @@ async def record(params: RecordParams) -> Dict[str, Any]:
         params: Recording parameters
 
     Returns:
-        Dict with events, statistics, and filter info
+        Dict with devices and their event timelines
     """
     mqtt = MQTTClient()
-    events: List[Dict[str, Any]] = []
-    unique_topics: set = set()
-    topic_last_payload: Dict[str, Any] = {}
+    devices: Dict[str, List[Dict[str, Any]]] = {}
+    device_last_payload: Dict[str, Dict[str, Any]] = {}
     ignored_count = 0
     start_time = datetime.now()
 
@@ -100,7 +140,7 @@ async def record(params: RecordParams) -> Dict[str, Any]:
                         ignored_count += 1
                         continue
 
-                    # Apply keyword filter if using wildcard subscription
+                    # Apply keyword filter
                     if not params.topics and not matches_keywords(topic, params.keywords):
                         continue
 
@@ -110,40 +150,37 @@ async def record(params: RecordParams) -> Dict[str, Any]:
                         try:
                             payload = json.loads(payload)
                         except json.JSONDecodeError:
-                            pass
+                            payload = {"value": payload}
                     except (UnicodeDecodeError, AttributeError):
-                        payload = str(message.payload)
+                        payload = {"value": str(message.payload)}
 
-                    # Check if this is a new topic or an update
-                    is_new = topic not in unique_topics
+                    # Clean payload
+                    cleaned = clean_payload(payload)
+                    if not cleaned:
+                        continue
 
-                    # Get changes
-                    if is_new:
-                        changes = payload
-                        change_type = "new"
-                    else:
-                        old_payload = topic_last_payload.get(topic)
-                        changes = get_payload_diff(old_payload, payload)
-                        change_type = "updated"
+                    # Get device name
+                    device_name = get_device_name(topic)
 
-                        # Skip if no changes
+                    # Initialize device if first time
+                    if device_name not in devices:
+                        devices[device_name] = []
+                        device_last_payload[device_name] = {}
+
+                    # Get only changed fields
+                    if device_last_payload[device_name]:
+                        changes = get_changes(device_last_payload[device_name], cleaned)
                         if not changes:
                             continue
+                    else:
+                        changes = cleaned
 
-                    # Record event with only changes
-                    event = {
-                        "timestamp": round(get_timestamp(), 3),
-                        "topic": topic,
-                        "changes": changes,
-                        "change_type": change_type
-                    }
-                    events.append(event)
-                    unique_topics.add(topic)
-                    topic_last_payload[topic] = payload
+                    # Record event with timestamp and changes
+                    event = {"t": round(get_timestamp(), 3)}
+                    event.update(changes)
 
-                    # Progress feedback
-                    if len(events) % 100 == 0:
-                        sys.stderr.write(f"Recorded {len(events)} events...\n")
+                    devices[device_name].append(event)
+                    device_last_payload[device_name] = cleaned
 
             # Record for specified duration
             try:
@@ -151,35 +188,17 @@ async def record(params: RecordParams) -> Dict[str, Any]:
             except asyncio.TimeoutError:
                 pass
 
-        # Calculate actual duration
-        duration = round(get_timestamp(), 3)
+        # Count total events
+        total_events = sum(len(events) for events in devices.values())
 
-        # Build filter info
-        filter_info = None
-        if params.topics:
-            filter_info = {
-                "type": "topics",
-                "values": params.topics
-            }
-        elif params.keywords:
-            filter_info = {
-                "type": "keywords",
-                "values": params.keywords
-            }
-
-        sys.stderr.write(f"Recording complete: {len(events)} events from {len(unique_topics)} topics")
+        sys.stderr.write(f"Recording complete: {total_events} events from {len(devices)} devices")
         if ignored_count > 0:
             sys.stderr.write(f" ({ignored_count} ignored)\n")
         else:
             sys.stderr.write("\n")
 
         return {
-            "duration": duration,
-            "filter": filter_info,
-            "events": events,
-            "unique_topics": len(unique_topics),
-            "total_events": len(events),
-            "ignored_events": ignored_count
+            "devices": devices
         }
 
     except Exception as e:
