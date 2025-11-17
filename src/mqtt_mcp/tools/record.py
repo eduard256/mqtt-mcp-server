@@ -16,6 +16,13 @@ IGNORED_TOPIC_PREFIXES = [
     "homeassistant/",
 ]
 
+# Topic suffixes to ignore (commands, not states)
+IGNORED_TOPIC_SUFFIXES = [
+    "/set",
+    "/get",
+    "/cmd",
+]
+
 # Fields to ignore (noise that doesn't represent real events)
 IGNORED_FIELDS = [
     "last_seen",
@@ -44,7 +51,13 @@ class RecordParams(BaseModel):
 
 def should_ignore_topic(topic: str) -> bool:
     """Check if topic should be ignored."""
-    return any(topic.startswith(prefix) for prefix in IGNORED_TOPIC_PREFIXES)
+    # Check prefixes
+    if any(topic.startswith(prefix) for prefix in IGNORED_TOPIC_PREFIXES):
+        return True
+    # Check suffixes
+    if any(topic.endswith(suffix) for suffix in IGNORED_TOPIC_SUFFIXES):
+        return True
+    return False
 
 
 def clean_payload(payload: Any) -> Dict[str, Any]:
@@ -65,11 +78,6 @@ def get_device_name(topic: str) -> str:
     # Remove common prefixes
     topic = topic.replace("zigbee2mqtt/", "")
     topic = topic.replace("automation/", "auto:")
-
-    # Remove /set, /action, /get suffixes
-    topic = topic.replace("/set", "")
-    topic = topic.replace("/action", "")
-    topic = topic.replace("/get", "")
 
     return topic
 
@@ -174,6 +182,11 @@ async def record(params: RecordParams) -> Dict[str, Any]:
                             continue
                     else:
                         changes = cleaned
+
+                    # Skip events where all values are null
+                    non_null_values = [v for v in changes.values() if v is not None]
+                    if not non_null_values:
+                        continue
 
                     # Record event with timestamp and changes
                     event = {"t": round(get_timestamp(), 3)}
